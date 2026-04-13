@@ -53,28 +53,52 @@ const unsigned long PHASE_HOLD_TIME = 5000;  // 5 Sekunden pro Phase
 // Phase 0 = RF-Status, Phase 1 = Stresslevel
 uint8_t currentPhase = 0;
 
-// --- Stress-Grenzwerte ---
-// Ungestresst
-const int16_t GX_UN_MIN = -81;
-const int16_t GX_UN_MAX =  26;
-const int16_t GY_UN_MIN = -70;
-const int16_t GY_UN_MAX =  66;
-const int16_t GZ_UN_MIN = -18;
-const int16_t GZ_UN_MAX =  15;
+// --------------------------------------------------
+// Stress-Grenzwerte Phase B (Inspire Living Lab UMM)
+// 0 = nicht gestresst
+// 2 = leicht belastet
+// 4 = leicht gestresst
+// 8 = (stark) gestresst
+// --------------------------------------------------
 
-// Gestresst
-const int16_t GX_ST_MIN = -42;
-const int16_t GX_ST_MAX =  53;
-const int16_t GY_ST_MIN = -89;
-const int16_t GY_ST_MAX = 134;
-const int16_t GZ_ST_MIN = -35;
-const int16_t GZ_ST_MAX =  33;
+// Stresslevel 0
+const int16_t GX_0_MIN = -4;   // aus -3.75 gerundet
+const int16_t GX_0_MAX =  7;   // aus  7.25 gerundet
+const int16_t GY_0_MIN = -6;   // aus -5.5 gerundet
+const int16_t GY_0_MAX =  9;
+const int16_t GZ_0_MIN = -7;   // aus -6.5 gerundet
+const int16_t GZ_0_MAX =  4;
+
+// Stresslevel 2
+const int16_t GX_2_MIN = -31;
+const int16_t GX_2_MAX =  24;  // aus 24.2 gerundet
+const int16_t GY_2_MIN = -67;
+const int16_t GY_2_MAX =  76;  // aus 75.8 gerundet
+const int16_t GZ_2_MIN = -18;
+const int16_t GZ_2_MAX =  19;  // aus 18.6 gerundet
+
+// Stresslevel 4
+const int16_t GX_4_MIN = -58;  // aus -58.25 gerundet
+const int16_t GX_4_MAX =  41;  // aus 41.15 gerundet
+const int16_t GY_4_MIN = -129; // aus -128.9 gerundet
+const int16_t GY_4_MAX =  143; // aus 142.6 gerundet
+const int16_t GZ_4_MIN = -30;  // aus -29.5 gerundet
+const int16_t GZ_4_MAX =  33;  // aus 33.2 gerundet
+
+// Stresslevel 8
+const int16_t GX_8_MIN = -113; // aus -112.75 gerundet
+const int16_t GX_8_MAX =   75; // aus 75.05 gerundet
+const int16_t GY_8_MIN = -252; // aus -252.3 gerundet
+const int16_t GY_8_MAX =  276; // aus 276.2 gerundet
+const int16_t GZ_8_MIN =  -53; // aus -52.5 gerundet
+const int16_t GZ_8_MAX =   62; // aus 62.4 gerundet
 
 // Stress-Level Enum
 enum StressLevel : uint8_t {
-  STRESS_UNGESTRESST = 0,
-  STRESS_LEICHT      = 1,
-  STRESS_GESTRESST   = 2
+  STRESS_0_NICHT          = 0,
+  STRESS_2_LEICHT_BELASTET = 1,
+  STRESS_4_LEICHT_GESTRESST = 2,
+  STRESS_8_GESTRESST      = 3
 };
 
 bool initSD() {
@@ -109,62 +133,86 @@ bool initSD() {
   return true;
 }
 
-// Klassifikation für eine Achse
+// Klassifikation für eine Achse nach 4 Stufen
 StressLevel classifyAxis(int16_t value,
-                         int16_t uMin, int16_t uMax,
-                         int16_t sMin, int16_t sMax)
+                         int16_t l0Min, int16_t l0Max,
+                         int16_t l2Min, int16_t l2Max,
+                         int16_t l4Min, int16_t l4Max,
+                         int16_t l8Min, int16_t l8Max)
 {
-  if (value >= uMin && value <= uMax) {
-    return STRESS_UNGESTRESST;
+  if (value >= l0Min && value <= l0Max) {
+    return STRESS_0_NICHT;
   }
 
-  if ((value >= sMin && value < uMin) || (value > uMax && value <= sMax)) {
-    return STRESS_LEICHT;
+  if (value >= l2Min && value <= l2Max) {
+    return STRESS_2_LEICHT_BELASTET;
   }
 
-  if (value < sMin || value > sMax) {
-    return STRESS_GESTRESST;
+  if (value >= l4Min && value <= l4Max) {
+    return STRESS_4_LEICHT_GESTRESST;
   }
 
-  return STRESS_GESTRESST;
+  if (value >= l8Min && value <= l8Max) {
+    return STRESS_8_GESTRESST;
+  }
+
+  // Alles außerhalb des 8er Bereichs wird als stark gestresst gewertet
+  return STRESS_8_GESTRESST;
 }
 
 // Kombiniere Gx, Gy, Gz zu einem Gesamt-Stresslevel
 StressLevel calcOverallStress(const Payload &p) {
-  StressLevel gxLvl = classifyAxis(p.gx, GX_UN_MIN, GX_UN_MAX, GX_ST_MIN, GX_ST_MAX);
-  StressLevel gyLvl = classifyAxis(p.gy, GY_UN_MIN, GY_UN_MAX, GY_ST_MIN, GY_ST_MAX);
-  StressLevel gzLvl = classifyAxis(p.gz, GZ_UN_MIN, GZ_UN_MAX, GZ_ST_MIN, GZ_ST_MAX);
+  StressLevel gxLvl = classifyAxis(p.gx,
+                                   GX_0_MIN, GX_0_MAX,
+                                   GX_2_MIN, GX_2_MAX,
+                                   GX_4_MIN, GX_4_MAX,
+                                   GX_8_MIN, GX_8_MAX);
 
-  if (gxLvl == STRESS_GESTRESST || gyLvl == STRESS_GESTRESST || gzLvl == STRESS_GESTRESST) {
-    return STRESS_GESTRESST;
-  }
-  if (gxLvl == STRESS_LEICHT || gyLvl == STRESS_LEICHT || gzLvl == STRESS_LEICHT) {
-    return STRESS_LEICHT;
-  }
-  return STRESS_UNGESTRESST;
+  StressLevel gyLvl = classifyAxis(p.gy,
+                                   GY_0_MIN, GY_0_MAX,
+                                   GY_2_MIN, GY_2_MAX,
+                                   GY_4_MIN, GY_4_MAX,
+                                   GY_8_MIN, GY_8_MAX);
+
+  StressLevel gzLvl = classifyAxis(p.gz,
+                                   GZ_0_MIN, GZ_0_MAX,
+                                   GZ_2_MIN, GZ_2_MAX,
+                                   GZ_4_MIN, GZ_4_MAX,
+                                   GZ_8_MIN, GZ_8_MAX);
+
+  // Höchstes Stresslevel gewinnt
+  StressLevel overall = gxLvl;
+  if (gyLvl > overall) overall = gyLvl;
+  if (gzLvl > overall) overall = gzLvl;
+
+  return overall;
 }
 
 const __FlashStringHelper* stressToText(StressLevel lvl) {
   switch (lvl) {
-    case STRESS_UNGESTRESST: return F("UNGESTRESST");
-    case STRESS_LEICHT:      return F("LEICHT");
-    case STRESS_GESTRESST:   return F("GESTRESST");
-    default:                 return F("?");
+    case STRESS_0_NICHT:             return F("NICHT");
+    case STRESS_2_LEICHT_BELASTET:   return F("BELASTET");
+    case STRESS_4_LEICHT_GESTRESST:  return F("LEICHT GESTR.");
+    case STRESS_8_GESTRESST:         return F("GESTRESST");
+    default:                         return F("?");
   }
 }
 
 void updateTrafficLight() {
   uint8_t stressedCount = 0;
-  uint8_t lightStressCount = 0;
+  uint8_t lightStressedCount = 0;
+  uint8_t burdenedCount = 0;
 
   for (uint8_t id = 1; id <= NUM_NODES; id++) {
     if (lastSeen[id] > 0) {
       StressLevel lvl = calcOverallStress(lastPayload[id]);
 
-      if (lvl == STRESS_GESTRESST) {
+      if (lvl == STRESS_8_GESTRESST) {
         stressedCount++;
-      } else if (lvl == STRESS_LEICHT) {
-        lightStressCount++;
+      } else if (lvl == STRESS_4_LEICHT_GESTRESST) {
+        lightStressedCount++;
+      } else if (lvl == STRESS_2_LEICHT_BELASTET) {
+        burdenedCount++;
       }
     }
   }
@@ -173,12 +221,15 @@ void updateTrafficLight() {
   digitalWrite(LED_YELLOW_PIN, LOW);
   digitalWrite(LED_GREEN_PIN, LOW);
 
-  if (stressedCount >= 2) {
+  // Rot: mindestens 2 stark gestresst ODER 1 stark + 1 leicht gestresst
+  if (stressedCount >= 2 || (stressedCount >= 1 && lightStressedCount >= 1)) {
     digitalWrite(LED_RED_PIN, HIGH);
-  } 
-  else if (stressedCount >= 1 || lightStressCount >= 2) {
+  }
+  // Gelb: mindestens 1 stark gestresst ODER 2 leicht gestresst ODER mehrere belastet
+  else if (stressedCount >= 1 || lightStressedCount >= 2 || burdenedCount >= 2) {
     digitalWrite(LED_YELLOW_PIN, HIGH);
-  } 
+  }
+  // Sonst grün
   else {
     digitalWrite(LED_GREEN_PIN, HIGH);
   }
